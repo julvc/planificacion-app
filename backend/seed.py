@@ -5,19 +5,11 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, engine, Base
 from app.models import User, Workstation, Allocation
 
-# 1. Crear las tablas en la BD
+# Crear tablas
 Base.metadata.create_all(bind=engine)
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 def parse_date(date_str, year=2026):
-    """Convierte 'Lunes 02/02' a objeto date 2026-02-02"""
-    match = re.search(r'(\d{2})/(\d{2})', str(date_str))
+    match = re.search(r'(\d{1,2})/(\d{2})', str(date_str))
     if match:
         day, month = match.groups()
         return datetime(year, int(month), int(day)).date()
@@ -25,57 +17,69 @@ def parse_date(date_str, year=2026):
 
 def seed_data():
     db = SessionLocal()
-    print("🔄 Iniciando carga masiva de datos...")
+    print("🔄 Iniciando carga masiva de datos (V2 Corregida)...")
     
-    # Limpiar datos anteriores (Opcional, cuidado en prod)
+    # Limpiar todo
     db.query(Allocation).delete()
     db.query(Workstation).delete()
     db.query(User).delete()
     db.commit()
 
-    file_path = 'Planificacion_Febrero_2026.csv' # Asegúrate que el nombre coincida
     try:
-        df_raw = pd.read_csv(file_path, header=None)
+        # header=None es clave para leerlo por coordenadas
+        df_raw = pd.read_excel('Planificacion_Febrero_2026.xlsx', header=None)
     except FileNotFoundError:
-        print(f"Error: No se encuentra {file_path}")
+        print("❌ Error: No se encuentra el archivo .xlsx")
         return
 
-    users_cache = {} # Cache para no consultar la DB a cada rato
+    users_cache = {}
     workstations_cache = {}
-
-    # Lógica de Parsing del Excel "Sucio"
-    current_row = 0
     total_allocations = 0
 
+    current_row = 0
     while current_row < len(df_raw):
-        row_data = df_raw.iloc[current_row]
-        first_col = str(row_data[0])
+        first_col = str(df_raw.iloc[current_row, 0])
 
         if "SEMANA" in first_col:
-            print(f"Procesando bloque: {first_col}")
+            print(f"📅 Detectado bloque: {first_col[:30]}...")
             
-            # La fila siguiente tiene las fechas
-            header_row = df_raw.iloc[current_row + 1]
-            date_map = {} # {col_index: python_date}
+            # CORRECCIÓN: Las fechas están en esta MISMA fila, columnas 2 a 6 (C a G)
+            header_row = df_raw.iloc[current_row]
+            date_map = {} 
             
-            for col_idx in range(2, 7): # Asumimos columnas C a G (días de la semana)
+            for col_idx in range(2, 7): 
                 raw_date = header_row[col_idx]
                 parsed_date = parse_date(raw_date)
                 if parsed_date:
                     date_map[col_idx] = parsed_date
             
-            # Iteramos las filas de datos de esta semana
-            data_cursor = current_row + 2
+            # Los datos de empleados empiezan en la fila siguiente
+            data_cursor = current_row + 1
+            
             while data_cursor < len(df_raw):
-                puesto_val = df_raw.iloc[data_cursor, 1]
+                puesto_val = df_raw.iloc[data_cursor, 1] # Columna B es Puesto
                 
-                # Si no hay puesto válido, se acabó el bloque
-                if pd.isna(puesto_val) or str(puesto_val).strip() == '':
+                # Si llegamos a una fila vacía o nueva semana, paramos
+                first_col_next = str(df_raw.iloc[data_cursor, 0])
+                if "SEMANA" in first_col_next:
                     break
-                
-                puesto_num = int(puesto_val)
-                
-                # 1. Crear/Recuperar Puesto
+                if pd.isna(puesto_val) or str(puesto_val).strip() == '':
+                    # A veces hay filas vacías intermedias, si también está vacía la col 0, salimos
+                    if pd.isna(df_raw.iloc[data_cursor, 0]):
+                         data_cursor += 1
+                         continue
+                    else:
+                         # Si es texto basura, seguimos
+                         pass
+
+                # Intentamos leer el puesto
+                try:
+                    puesto_num = int(float(puesto_val)) # float por si pandas leyó 18.0
+                except (ValueError, TypeError):
+                    data_cursor += 1
+                    continue
+
+                # 1. Gestionar Puesto
                 if puesto_num not in workstations_cache:
                     ws = Workstation(number=puesto_num, description=f"Puesto {puesto_num}")
                     db.add(ws)
@@ -85,49 +89,44 @@ def seed_data():
                 
                 ws_id = workstations_cache[puesto_num]
 
-                # 2. Iterar días
+                # 2. Gestionar Personas en las fechas detectadas
                 for col_idx, date_obj in date_map.items():
                     user_name = df_raw.iloc[data_cursor, col_idx]
                     
-                    # Validar que sea un nombre real
-                    if pd.notna(user_name) and str(user_name) not in ['X', 'Libre', 'nan']:
-                        user_name = str(user_name).strip()
+                    if pd.notna(user_name) and str(user_name).strip() not in ['X', 'Libre', 'nan', 'Change']:
+                        name_clean = str(user_name).strip()
                         
-                        # 3. Crear/Recuperar Usuario
-                        if user_name not in users_cache:
-                            # Creamos email dummy
-                            dummy_email = f"{user_name.lower().replace(' ', '.')}@empresa.com"
+                        if name_clean not in users_cache:
+                            dummy_email = f"{name_clean.lower().replace(' ', '.')}@dev.com"
                             new_user = User(
-                                full_name=user_name,
-                                email=dummy_email,
-                                hashed_password="hashed_secret_123", # TODO: Usar hash real después
-                                swap_credits=3
+                                full_name=name_clean, 
+                                email=dummy_email, 
+                                hashed_password="123",
+                                swap_credits=5
                             )
                             db.add(new_user)
                             db.commit()
                             db.refresh(new_user)
-                            users_cache[user_name] = new_user.id
+                            users_cache[name_clean] = new_user.id
                         
-                        u_id = users_cache[user_name]
-
-                        # 4. Crear Asignación
-                        allocation = Allocation(
+                        # Crear asignación
+                        alloc = Allocation(
                             date=date_obj,
-                            user_id=u_id,
+                            user_id=users_cache[name_clean],
                             workstation_id=ws_id
                         )
-                        db.add(allocation)
+                        db.add(alloc)
                         total_allocations += 1
-                
+
                 data_cursor += 1
             
-            # Saltamos el cursor principal al final de este bloque
+            # Avanzamos el cursor principal
             current_row = data_cursor
         else:
             current_row += 1
 
     db.commit()
-    print(f"Carga completa: {len(users_cache)} usuarios, {len(workstations_cache)} puestos, {total_allocations} asignaciones creadas.")
+    print(f"✅ ¡Éxito! {len(users_cache)} usuarios, {len(workstations_cache)} puestos, {total_allocations} turnos cargados.")
     db.close()
 
 if __name__ == "__main__":
