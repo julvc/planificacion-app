@@ -14,9 +14,14 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Gestor de Turnos")
 
+origins = [
+    "http://localhost:5173", # Para cuando trabajes local
+    "https://planificacion-app.vercel.app" # <--- TU DOMINIO DE VERCEL
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # En producción cambiar por la IP específica
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
