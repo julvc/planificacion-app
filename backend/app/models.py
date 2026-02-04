@@ -56,21 +56,22 @@ class Allocation(Base):
     workstation = relationship("Workstation", back_populates="allocations")
 
 class SwapRequest(Base):
-    """
-    La propuesta de cambio.
-    Usuario A quiere cambiar SU fecha X por la fecha X del Usuario B.
-    (Normalmente es el mismo día, pero diferente puesto).
-    """
     __tablename__ = "swap_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    requester_id = Column(Integer, ForeignKey(USERS_TABLE))
-    target_user_id = Column(Integer, ForeignKey(USERS_TABLE))
+    requester_id = Column(Integer, ForeignKey("users.id"))
+    target_user_id = Column(Integer, ForeignKey("users.id"))
     
-    target_date = Column(Date) # La fecha del cambio
+    # --- CAMBIO IMPORTANTE ---
+    # Guardamos las dos fechas involucradas en el trueque
+    requester_date = Column(Date) # La fecha que tú entregas
+    target_date = Column(Date)    # La fecha que tú quieres recibir
+    # -------------------------
+
     status = Column(Enum(RequestStatus), default=RequestStatus.PENDING)
-    
-    created_at = Column(String) # Timestamp simple
+    created_at = Column(String) 
 
     requester = relationship("User", foreign_keys=[requester_id], back_populates="sent_requests")
     target_user = relationship("User", foreign_keys=[target_user_id], back_populates="received_requests")
+
+    
