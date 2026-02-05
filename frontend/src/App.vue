@@ -73,8 +73,22 @@ const formatDate = (dateStr) => { const [year, month, day] = dateStr.split('-');
 
 const getCellClass = (alloc) => {
   if (!alloc) return 'cell empty'
+
   if (selectedOffer.value && selectedOffer.value.id === alloc.id) return 'cell selected-offer'
-  if (currentUser.value && alloc.user === getUserNameById(currentUser.value)) return 'cell my-shift'
+
+  const myName = getUserNameById(currentUser.value)
+  if (currentUser.value && alloc.user === myName) {
+
+    const hasPendingRequest = pendingRequests.value.some(
+      req => req.target_allocation_id === alloc.id
+    )
+
+    if (hasPendingRequest) {
+      return 'cell my-shift pending-alert'
+    }
+    return 'cell my-shift'
+  }
+
   return 'cell occupied'
 }
 
@@ -689,7 +703,7 @@ div:where(.swal2-actions) button {
 }
 
 /* =========================================
-   RESPONSIVE DESIGN (MÓVILES)
+    RESPONSIVE DESIGN (MÓVILES)
    ========================================= */
 
 /* 1. ESTILOS GENERALES PARA PANTALLAS PEQUEÑAS */
@@ -842,6 +856,51 @@ div:where(.swal2-actions) button {
   .table-wrapper {
     max-height: 80vh;
     /* Scroll vertical si hay muchos puestos */
+  }
+}
+
+/* ESTILO PARA TURNO CON SOLICITUD PENDIENTE */
+.cell.pending-alert {
+  background-color: #fff7ed !important;
+  /* Fondo naranja muy claro */
+  color: #c2410c !important;
+  /* Texto naranja oscuro */
+  border: 2px solid #f97316 !important;
+  /* Borde naranja vibrante */
+  position: relative;
+  overflow: hidden;
+  animation: pulse-warning 2s infinite;
+}
+
+/* Un pequeño punto indicador en la esquina */
+.cell.pending-alert::after {
+  content: "!";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #ea580c;
+  color: white;
+  font-size: 10px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+@keyframes pulse-warning {
+  0% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(249, 115, 22, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
   }
 }
 </style>

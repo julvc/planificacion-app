@@ -169,6 +169,7 @@ def get_pending_requests(user_id: int, db: Session = Depends(get_db)):
             "requester_name": r.requester.full_name,
             "requester_date": r.requester_date,
             "my_date": r.target_date,
+            "target_allocation_id": r.target_allocation_id,
             "status": r.status
         })
     return result
