@@ -47,10 +47,11 @@ class SwapRequestCreate(BaseModel):
     requester_id: int
     offer_allocation_id: int  # El ID de tu turno (origen)
     target_allocation_id: int # El ID del turno que quieres (destino)
-
+    verification_code: str
 class SwapResponse(BaseModel):
     request_id: int
     action: str  # "ACCEPT" o "REJECT"
+    verification_code: str = ""
 
 # --- Dependencia para obtener la DB ---
 def get_db():
@@ -135,8 +136,9 @@ def request_swap(payload: SwapRequestCreate, db: Session = Depends(get_db)):
     new_request = models.SwapRequest(
         requester_id=requester.id,
         target_user_id=target_alloc.user_id,
-        requester_date=offer_alloc.date, # Guardo mi fecha
-        target_date=target_alloc.date,   # Guardo su fecha
+        requester_date=offer_alloc.date,
+        target_date=target_alloc.date,
+        verification_code=payload.verification_code, # <--- GUARDAMOS EL CÓDIGO
         status=models.RequestStatus.PENDING,
         created_at=str(date.today())
     )
@@ -183,6 +185,9 @@ def process_swap(payload: SwapResponse, db: Session = Depends(get_db)):
     
     if req.status != models.RequestStatus.PENDING:
         raise HTTPException(status_code=400, detail="Esta solicitud ya fue procesada")
+    
+    if req.verification_code != payload.verification_code:
+            raise HTTPException(status_code=403, detail="⛔ Código de seguridad incorrecto.")
 
     # 2. Lógica de Rechazo
     if payload.action == "REJECT":
@@ -223,6 +228,5 @@ def process_swap(payload: SwapResponse, db: Session = Depends(get_db)):
 
         # Actualizamos estado de la solicitud
         req.status = models.RequestStatus.ACCEPTED
-        
         db.commit()
-        return {"message": "✅ ¡Intercambio realizado con éxito! La tabla se ha actualizado."}
+        return {"message": "✅ ¡Código correcto, intercambio realizado con éxito! La tabla se ha actualizado."}

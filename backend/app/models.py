@@ -61,7 +61,7 @@ class SwapRequest(Base):
     id = Column(Integer, primary_key=True, index=True)
     requester_id = Column(Integer, ForeignKey("users.id"))
     target_user_id = Column(Integer, ForeignKey("users.id"))
-    
+    verification_code = Column(String)
     # --- CAMBIO IMPORTANTE ---
     # Guardamos las dos fechas involucradas en el trueque
     requester_date = Column(Date) # La fecha que tú entregas

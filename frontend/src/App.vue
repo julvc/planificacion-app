@@ -129,31 +129,87 @@ const handleCellClick = async (alloc) => {
   }
 
   // C. CONFIRMACIÓN ESTILIZADA
-  const result = await Swal.fire({
-    title: 'Proponer Intercambio',
-    html: `
-      <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; text-align: left; font-size: 14px; color: #334155;">
-        <div style="margin-bottom: 10px;">
-          <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold;">Tú entregas:</span><br>
-          <span style="font-weight: 600; font-size: 16px;">📅 ${formatDate(selectedOffer.value.date)}</span> 
-          <span style="color: #64748b;">(Puesto #${selectedOffer.value.workstation})</span>
-        </div>
-        <div style="border-top: 1px dashed #cbd5e1; margin: 10px 0;"></div>
-        <div>
-          <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold;">Recibes de ${alloc.user}:</span><br>
-          <span style="font-weight: 600; font-size: 16px; color: #2563eb;">📅 ${formatDate(alloc.date)}</span>
-          <span style="color: #64748b;">(Puesto #${alloc.workstation})</span>
-        </div>
-      </div>
-    `,
+  const { value: secretCode } = await Swal.fire({
+    title: 'Seguridad Requerida',
+    input: 'text',
+    inputLabel: 'Crea una palabra clave para este cambio',
+    inputPlaceholder: 'Ej: 1234, PIZZA, GOKU',
+    html: `Tú entregas: <b>${formatDate(selectedOffer.value.date)}</b><br>Recibes: <b>${formatDate(alloc.date)}</b>`,
     showCancelButton: true,
-    confirmButtonColor: COLORS.primary,
-    cancelButtonColor: COLORS.cancel,
-    confirmButtonText: 'Enviar Propuesta',
-    cancelButtonText: 'Cancelar',
-    reverseButtons: true, // Botón de acción a la derecha (estilo Windows/Web moderno)
-    focusConfirm: false
+    confirmButtonText: 'Enviar Solicitud',
+    inputValidator: (value) => {
+      if (!value) {
+        return '¡Debes escribir un código!'
+      }
+    }
   })
+
+  if (secretCode) {
+    // 1. Sanitizar entrada (quitar espacios al inicio/final)
+    const codeToSend = secretCode.trim()
+
+    try {
+      // 2. Mostrar "Cargando..." antes de enviar (UX)
+      Swal.fire({
+        title: 'Enviando solicitud...',
+        text: 'Por favor espera',
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading() // Activa el spinner
+        }
+      })
+
+      // 3. Petición al Backend
+      await axios.post(`${API_URL}/request-swap`, {
+        requester_id: currentUser.value,
+        offer_allocation_id: selectedOffer.value.id,
+        target_allocation_id: alloc.id,
+        verification_code: codeToSend
+      })
+
+      // 4. Éxito: Mostrar el código en GRANDE para que no se olvide
+      await Swal.fire({
+        icon: 'success',
+        title: '¡Solicitud Enviada!',
+        html: `
+        <div style="text-align: center;">
+          <p class="mb-2">Dile a tu compañero que la clave secreta es:</p>
+          <div style="
+            background: #eff6ff; 
+            color: #1d4ed8; 
+            font-size: 28px; 
+            font-weight: 800; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border: 2px dashed #93c5fd;
+            margin: 10px 0;
+            letter-spacing: 2px;
+          ">
+            ${codeToSend}
+          </div>
+          <small style="color: #6b7280;">Sin este código, no podrán aceptar el cambio.</small>
+        </div>
+      `,
+        confirmButtonText: 'Entendido, copiado',
+        confirmButtonColor: COLORS.success
+      })
+
+      // 5. Limpieza de estado
+      selectedOffer.value = null
+
+    } catch (error) {
+      // 6. Manejo de Errores Robusto
+      // Si el backend envía un mensaje específico (ej: 400, 404), lo mostramos.
+      const errorMsg = error.response?.data?.detail || "No se pudo enviar la solicitud. Revisa tu conexión.";
+
+      Swal.fire({
+        icon: 'error',
+        title: 'Hubo un problema',
+        text: errorMsg,
+        confirmButtonColor: COLORS.danger
+      })
+    }
+  }
 
   if (result.isConfirmed) {
     try {
@@ -179,33 +235,40 @@ const handleCellClick = async (alloc) => {
 }
 
 const handleResponse = async (reqId, action) => {
-  try {
-    if (action === 'REJECT') {
-      const result = await Swal.fire({
-        title: '¿Rechazar solicitud?',
-        text: "Esta acción no se puede deshacer.",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: COLORS.danger,
-        cancelButtonColor: COLORS.cancel,
-        confirmButtonText: 'Sí, rechazar'
-      })
-      if (!result.isConfirmed) return
-    }
+  let codeInput = ""
 
-    await axios.post('http://localhost:8000/process-swap', { request_id: reqId, action: action })
-
-    Swal.fire({
-      icon: 'success',
-      title: action === 'ACCEPT' ? 'Intercambio Exitoso' : 'Rechazado',
-      showConfirmButton: false,
-      timer: 1500,
-      timerProgressBar: true
+  // Si es ACEPTAR, pedimos el código
+  if (action === 'ACCEPT') {
+    const { value: code } = await Swal.fire({
+      title: 'Código de Seguridad',
+      input: 'text',
+      inputLabel: 'Ingresa la clave que te dio tu compañero',
+      inputPlaceholder: 'Clave secreta...',
+      showCancelButton: true,
+      inputValidator: (value) => {
+        if (!value) return 'El código es obligatorio'
+      }
     })
 
+    if (!code) return // Si canceló
+    codeInput = code
+  }
+  // Si es REJECT, confirmación simple
+  else {
+    const res = await Swal.fire({ title: '¿Rechazar?', showCancelButton: true, confirmButtonText: 'Sí' })
+    if (!res.isConfirmed) return
+  }
+
+  try {
+    await axios.post(`${API_URL}/process-swap`, {
+      request_id: reqId,
+      action: action,
+      verification_code: codeInput // Enviamos lo que escribió (o vacío si rechazó)
+    })
+    Swal.fire('Éxito', action === 'ACCEPT' ? '¡Cambio Realizado!' : 'Rechazado', 'success')
     await fetchData()
   } catch (error) {
-    Swal.fire('Error', 'No se pudo procesar la solicitud', 'error')
+    Swal.fire('Error', error.response?.data?.detail || 'Código incorrecto', 'error')
   }
 }
 
@@ -214,6 +277,13 @@ onMounted(() => fetchData())
 </script>
 
 <template>
+  <div class="rotate-warning">
+    <div class="rotate-content">
+      <div class="rotate-icon">📱🔄</div>
+      <h3>Gira tu teléfono</h3>
+      <p>La planificación es muy ancha para verla en vertical.</p>
+    </div>
+  </div>
   <div class="container">
     <header>
       <div class="header-left">
@@ -616,5 +686,162 @@ div:where(.swal2-actions) button {
   border-radius: 8px !important;
   font-weight: 500 !important;
   padding: 10px 24px !important;
+}
+
+/* =========================================
+   RESPONSIVE DESIGN (MÓVILES)
+   ========================================= */
+
+/* 1. ESTILOS GENERALES PARA PANTALLAS PEQUEÑAS */
+@media (max-width: 900px) {
+  .container {
+    padding: 10px;
+    /* Menos relleno */
+    max-width: 100vw;
+  }
+
+  /* Header más compacto */
+  header {
+    flex-direction: column;
+    /* Apilar elementos si es necesario */
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .header-left h1 {
+    font-size: 18px;
+    /* Título más pequeño */
+  }
+
+  .subtitle {
+    display: none;
+    /* Ocultar subtítulo para ahorrar espacio */
+  }
+
+  .header-right {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  /* Ajustar botones y selects para dedos (Touch targets) */
+  select,
+  .refresh-btn {
+    padding: 10px;
+    font-size: 16px;
+    /* Evita zoom automático en iPhone */
+  }
+
+  /* TABLA: Ajustes críticos */
+  th,
+  td {
+    height: 50px;
+    /* Celdas más altas para dedos gordos */
+    min-width: 60px;
+    /* Ancho mínimo por día */
+    font-size: 12px;
+  }
+
+  .sticky-col {
+    width: 60px;
+    /* Puesto más angosto */
+    font-size: 11px;
+    padding: 0 5px;
+  }
+
+  /* Notificaciones más compactas */
+  .notification-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .notif-actions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+/* 2. PANTALLA DE "GIRA TU TELÉFONO" (Solo Vertical) */
+.rotate-warning {
+  display: none;
+  /* Oculto por defecto */
+}
+
+@media (max-width: 900px) and (orientation: portrait) {
+  .rotate-warning {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #1e293b;
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    text-align: center;
+  }
+
+  .rotate-content {
+    padding: 20px;
+  }
+
+  .rotate-icon {
+    font-size: 60px;
+    margin-bottom: 20px;
+    animation: spin 2s infinite;
+  }
+
+  .container {
+    display: none;
+    /* Oculta la app de fondo */
+  }
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  25% {
+    transform: rotate(-90deg);
+  }
+
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+/* 3. MODO PAISAJE (LANDSCAPE) - La vista óptima */
+@media (max-width: 900px) and (orientation: landscape) {
+  .container {
+    padding: 5px;
+    /* Aprovechar cada pixel */
+  }
+
+  header {
+    flex-direction: row;
+    /* Volver a fila para ahorrar altura */
+    padding: 8px;
+    margin-bottom: 10px;
+  }
+
+  .header-left h1 {
+    font-size: 16px;
+  }
+
+  .user-select-wrapper label {
+    display: none;
+    /* Ocultar texto "Usuario:" */
+  }
+
+  /* La tabla debe ocupar casi toda la altura */
+  .table-wrapper {
+    max-height: 80vh;
+    /* Scroll vertical si hay muchos puestos */
+  }
 }
 </style>
